@@ -13,17 +13,18 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -40,6 +41,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
@@ -92,40 +94,33 @@ private fun WearTimerScreen() {
         ),
     )
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(bg)
-            .padding(horizontal = 18.dp, vertical = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Timer", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Text(state.timeLabel, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text(state.statusMessage, style = MaterialTheme.typography.bodyMedium)
-        Text(
-            text = "Swipe pages ${pagerState.currentPage + 1}/3",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
         HorizontalPager(
             state = pagerState,
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
+                .fillMaxSize(),
         ) { page ->
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(bottom = 4.dp),
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .padding(bottom = 28.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                CompactStatusHeader(
+                    page = page,
+                    timeLabel = state.timeLabel,
+                    statusMessage = state.statusMessage,
+                )
                 when (page) {
                     0 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Run", style = MaterialTheme.typography.titleSmall)
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Cadence", style = MaterialTheme.typography.bodySmall)
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf(AnnouncementCadence.EVERY_10S, AnnouncementCadence.EVERY_30S).forEach { option ->
@@ -153,8 +148,7 @@ private fun WearTimerScreen() {
 
                     1 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Schedule", style = MaterialTheme.typography.titleSmall)
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(
                                     value = offsetSecondsText,
                                     onValueChange = { newValue ->
@@ -186,8 +180,7 @@ private fun WearTimerScreen() {
 
                     else -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Voice", style = MaterialTheme.typography.titleSmall)
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(if (state.speechAvailable) "Say 'go'" else "Unavailable", style = MaterialTheme.typography.bodySmall)
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Button(
@@ -207,7 +200,7 @@ private fun WearTimerScreen() {
                                     ) { Text("Stop") }
                                 }
                                 Text(
-                                    "Notification stays on while running or listening.",
+                                    "Notification stays on while active.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -215,9 +208,16 @@ private fun WearTimerScreen() {
                         }
                     }
                 }
-                Spacer(Modifier.height(4.dp))
             }
         }
+
+        PageDots(
+            selectedIndex = pagerState.currentPage,
+            count = 3,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 8.dp),
+        )
     }
 }
 
@@ -234,6 +234,69 @@ private fun RowScope.CadenceChip(option: AnnouncementCadence, selected: Boolean,
             ),
     ) {
         Text(option.label)
+    }
+}
+
+@Composable
+private fun CompactStatusHeader(page: Int, timeLabel: String, statusMessage: String) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    when (page) {
+                        0 -> "Run"
+                        1 -> "Schedule"
+                        else -> "Voice"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    timeLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Text(
+                statusMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PageDots(selectedIndex: Int, count: Int, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .background(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                shape = RoundedCornerShape(999.dp),
+            )
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(count) { index ->
+            val color = if (index == selectedIndex) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+            }
+            Box(
+                modifier = Modifier
+                    .size(if (index == selectedIndex) 7.dp else 6.dp)
+                    .background(color = color, shape = CircleShape),
+            )
+        }
     }
 }
 
