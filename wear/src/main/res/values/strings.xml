@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">TalkingTimer Wear</string>
+    <string name="notification_channel_name">Talking Timer Wear</string>
+    <string name="notification_channel_desc">Running timer, schedules, and voice start on watch</string>
+</resources>

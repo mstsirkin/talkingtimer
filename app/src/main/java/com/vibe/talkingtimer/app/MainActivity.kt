@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -65,6 +66,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun TalkingTimerScreen() {
     val context = LocalContext.current
     val state by PhoneTimerStateBus.state.collectAsStateWithLifecycle()
@@ -75,6 +77,7 @@ private fun TalkingTimerScreen() {
 
     val notificationPermissionLauncher = rememberPermissionLauncher(Manifest.permission.POST_NOTIFICATIONS)
     val micPermissionLauncher = rememberPermissionLauncher(Manifest.permission.RECORD_AUDIO)
+    val offsetMs = offsetSecondsText.toLongOrNull()?.times(1000L) ?: 0L
 
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33 && !hasPermission(context, Manifest.permission.POST_NOTIFICATIONS)) {
@@ -142,8 +145,6 @@ private fun TalkingTimerScreen() {
                     supportingText = { Text("Examples: 0, -10, -300") },
                     singleLine = true,
                 )
-
-                val offsetMs = offsetSecondsText.toLongOrNull()?.times(1000L) ?: 0L
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(

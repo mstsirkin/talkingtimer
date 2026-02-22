@@ -1,4 +1,4 @@
-package com.vibe.talkingtimer.app
+package com.vibe.talkingtimer.wear
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -33,7 +33,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class TimerForegroundService : Service() {
+class WearTimerForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val engine = TimerEngine()
     private lateinit var audioPlayer: ClipAudioPlayer
@@ -87,7 +87,7 @@ class TimerForegroundService : Service() {
                     processEvents(events)
                     ensureForegroundState()
                     publishState()
-                } else if (PhoneTimerStateBus.state.value.isActive) {
+                } else if (WearTimerStateBus.state.value.isActive) {
                     publishState()
                     updateNotification()
                 }
@@ -189,8 +189,8 @@ class TimerForegroundService : Service() {
             }
             else -> lastStatusMessage
         }
-        PhoneTimerStateBus.publish(
-            PhoneTimerState(
+        WearTimerStateBus.publish(
+            WearTimerState(
                 mode = snapshot.mode,
                 elapsedMs = snapshot.elapsedMs,
                 cadence = snapshot.cadence,
@@ -204,7 +204,7 @@ class TimerForegroundService : Service() {
     }
 
     private fun ensureForegroundState() {
-        val state = PhoneTimerStateBus.state.value
+        val state = WearTimerStateBus.state.value
         if (state.isActive) {
             startForeground(NOTIFICATION_ID, buildNotification(state))
         } else {
@@ -213,12 +213,12 @@ class TimerForegroundService : Service() {
     }
 
     private fun updateNotification() {
-        val state = PhoneTimerStateBus.state.value
+        val state = WearTimerStateBus.state.value
         if (!state.isActive) return
         getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification(state))
     }
 
-    private fun buildNotification(state: PhoneTimerState): Notification {
+    private fun buildNotification(state: WearTimerState): Notification {
         val openIntent = PendingIntent.getActivity(
             this,
             100,
@@ -257,7 +257,7 @@ class TimerForegroundService : Service() {
         return builder.build()
     }
 
-    private fun buildNotificationText(state: PhoneTimerState): String {
+    private fun buildNotificationText(state: WearTimerState): String {
         return when {
             state.mode == TimerMode.RUNNING -> "${state.timeLabel} · ${state.cadence.label}"
             state.mode == TimerMode.WAITING_FOR_SCHEDULE -> state.statusMessage
@@ -269,7 +269,7 @@ class TimerForegroundService : Service() {
     private fun maybeStopServiceIfIdle() {
         publishState()
         ensureForegroundState()
-        if (!PhoneTimerStateBus.state.value.isActive) {
+        if (!WearTimerStateBus.state.value.isActive) {
             stopSelf()
         }
     }
@@ -458,11 +458,11 @@ class TimerForegroundService : Service() {
         private const val EXTRA_TARGET_WALL_MS = "target_wall_ms"
         private const val EXTRA_START_SOURCE = "start_source"
 
-        const val ACTION_START_NOW = "com.vibe.talkingtimer.app.action.START_NOW"
-        const val ACTION_SCHEDULE_AT = "com.vibe.talkingtimer.app.action.SCHEDULE_AT"
-        const val ACTION_STOP_TIMER = "com.vibe.talkingtimer.app.action.STOP_TIMER"
-        const val ACTION_START_LISTENING = "com.vibe.talkingtimer.app.action.START_LISTENING"
-        const val ACTION_STOP_LISTENING = "com.vibe.talkingtimer.app.action.STOP_LISTENING"
+        const val ACTION_START_NOW = "com.vibe.talkingtimer.wear.action.START_NOW"
+        const val ACTION_SCHEDULE_AT = "com.vibe.talkingtimer.wear.action.SCHEDULE_AT"
+        const val ACTION_STOP_TIMER = "com.vibe.talkingtimer.wear.action.STOP_TIMER"
+        const val ACTION_START_LISTENING = "com.vibe.talkingtimer.wear.action.START_LISTENING"
+        const val ACTION_STOP_LISTENING = "com.vibe.talkingtimer.wear.action.STOP_LISTENING"
 
         fun startNowIntent(context: Context, cadence: AnnouncementCadence, startOffsetMs: Long, source: StartSource = StartSource.MANUAL): Intent {
             return intentFor(context, ACTION_START_NOW).apply {
@@ -491,7 +491,7 @@ class TimerForegroundService : Service() {
         fun stopTimerIntent(context: Context): Intent = intentFor(context, ACTION_STOP_TIMER)
 
         private fun intentFor(context: Context, action: String): Intent {
-            return Intent(context, TimerForegroundService::class.java).setAction(action)
+            return Intent(context, WearTimerForegroundService::class.java).setAction(action)
         }
     }
 }
