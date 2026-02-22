@@ -1,0 +1,15 @@
+.gradle/
+local.properties
+.env
+.env.*
+!.env.example
+**/build/
+.idea/
+*.iml
+*.keystore
+captures/
+*.apk
+*.aab
+*.ap_
+*.log
+/audio-assets/audio/**/*.wav

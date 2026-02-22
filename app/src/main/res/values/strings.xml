@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">TalkingTimer</string>
+    <string name="notification_channel_name">Talking Timer</string>
+    <string name="notification_channel_desc">Running timer, schedules, and voice start</string>
+</resources>
