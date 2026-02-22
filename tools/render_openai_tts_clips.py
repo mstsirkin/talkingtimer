@@ -15,6 +15,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 import urllib.request
@@ -110,6 +112,32 @@ def synthesize(api_key: str, model: str, voice: str, text: str, fmt: str) -> byt
         return resp.read()
 
 
+def trim_silence_in_place(path: Path, threshold_db: int = -42) -> None:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return
+    tmp_path = path.with_name(path.stem + ".trimtmp" + path.suffix)
+    filter_graph = (
+        f"silenceremove=start_periods=1:start_threshold={threshold_db}dB:start_silence=0.03,"
+        f"areverse,silenceremove=start_periods=1:start_threshold={threshold_db}dB:start_silence=0.03,areverse"
+    )
+    subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-af",
+            filter_graph,
+            str(tmp_path),
+        ],
+        check=True,
+    )
+    tmp_path.replace(path)
+
+
 def iter_targets(
     manifest: dict[str, str],
     only_missing: bool,
@@ -136,6 +164,8 @@ def main() -> int:
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--sleep-ms", type=int, default=250)
+    parser.add_argument("--no-trim-silence", action="store_true", help="Keep raw TTS clips without silence trimming")
+    parser.add_argument("--trim-threshold-db", type=int, default=-42)
     args = parser.parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -174,6 +204,8 @@ def main() -> int:
         try:
             audio = synthesize(api_key=api_key, model=args.model, voice=args.voice, text=text, fmt=args.format)
             path.write_bytes(audio)
+            if not args.no_trim_silence:
+                trim_silence_in_place(path, threshold_db=args.trim_threshold_db)
             print(f"[{index}/{len(targets)}] OK {path.name} ({len(audio)} bytes)")
             time.sleep(max(0, args.sleep_ms) / 1000.0)
         except Exception as exc:  # noqa: BLE001

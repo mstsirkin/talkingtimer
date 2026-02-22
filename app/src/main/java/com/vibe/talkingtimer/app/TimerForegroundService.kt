@@ -62,8 +62,9 @@ class TimerForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         handleIntent(intent)
-        ensureForegroundState()
         publishState()
+        ensureForegroundState()
+        updateNotification()
         return START_STICKY
     }
 
@@ -86,10 +87,12 @@ class TimerForegroundService : Service() {
                 val events = engine.tick(nowElapsed, nowWall)
                 if (events.isNotEmpty()) {
                     processEvents(events)
-                    ensureForegroundState()
                     publishState()
+                    ensureForegroundState()
+                    updateNotification()
                 } else if (PhoneTimerStateBus.state.value.isActive) {
                     publishState()
+                    ensureForegroundState()
                     updateNotification()
                 }
                 delay(200)
@@ -303,8 +306,9 @@ class TimerForegroundService : Service() {
             }
         }
         beginListeningSession()
-        ensureForegroundState()
         publishState()
+        ensureForegroundState()
+        updateNotification()
     }
 
     private fun beginListeningSession() {
@@ -437,8 +441,8 @@ class TimerForegroundService : Service() {
             source = StartSource.VOICE,
         )
         processEvents(events)
-        ensureForegroundState()
         publishState()
+        ensureForegroundState()
         updateNotification()
     }
 
