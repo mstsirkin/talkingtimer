@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +21,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -61,6 +64,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun WearTimerScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val state by WearTimerStateBus.state.collectAsStateWithLifecycle()
@@ -69,6 +73,7 @@ private fun WearTimerScreen() {
     var offsetSecondsText by rememberSaveable { mutableStateOf("0") }
     var scheduledTargetWallMs by rememberSaveable { mutableLongStateOf(0L) }
     val offsetMs = offsetSecondsText.toLongOrNull()?.times(1000L) ?: 0L
+    val pagerState = rememberPagerState(pageCount = { 3 })
 
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -91,86 +96,128 @@ private fun WearTimerScreen() {
         modifier = Modifier
             .fillMaxSize()
             .background(bg)
-            .padding(horizontal = 18.dp, vertical = 22.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 18.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("Timer", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(state.timeLabel, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Text(state.statusMessage, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = "Swipe pages ${pagerState.currentPage + 1}/3",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Cadence", style = MaterialTheme.typography.titleSmall)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(AnnouncementCadence.EVERY_10S, AnnouncementCadence.EVERY_30S).forEach { option ->
-                        CadenceChip(option, cadence == option) { cadence = option }
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) { page ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                when (page) {
+                    0 -> {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Run", style = MaterialTheme.typography.titleSmall)
+                                Text("Cadence", style = MaterialTheme.typography.bodySmall)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(AnnouncementCadence.EVERY_10S, AnnouncementCadence.EVERY_30S).forEach { option ->
+                                        CadenceChip(option, cadence == option) { cadence = option }
+                                    }
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(AnnouncementCadence.EVERY_1M, AnnouncementCadence.EVERY_5M).forEach { option ->
+                                        CadenceChip(option, cadence == option) { cadence = option }
+                                    }
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Button(
+                                        onClick = { startService(context, WearTimerForegroundService.startNowIntent(context, cadence, offsetMs)) },
+                                        modifier = Modifier.weight(1f),
+                                    ) { Text("Start") }
+                                    Button(
+                                        onClick = { startService(context, WearTimerForegroundService.stopTimerIntent(context)) },
+                                        modifier = Modifier.weight(1f),
+                                    ) { Text("Stop") }
+                                }
+                            }
+                        }
+                    }
+
+                    1 -> {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Schedule", style = MaterialTheme.typography.titleSmall)
+                                OutlinedTextField(
+                                    value = offsetSecondsText,
+                                    onValueChange = { newValue ->
+                                        offsetSecondsText = newValue.filter { ch -> ch.isDigit() || ch == '-' }.take(6)
+                                    },
+                                    label = { Text("Offset s") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Button(onClick = { scheduledTargetWallMs = nextMinuteBoundary() }, modifier = Modifier.weight(1f)) { Text("+1m") }
+                                    Button(
+                                        onClick = {
+                                            val target = if (scheduledTargetWallMs > 0L) scheduledTargetWallMs else nextMinuteBoundary()
+                                            startService(context, WearTimerForegroundService.scheduleIntent(context, cadence, offsetMs, target))
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                    ) { Text("Go At") }
+                                }
+                                TextButton(
+                                    onClick = { showTimePicker(context) { scheduledTargetWallMs = it } },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(if (scheduledTargetWallMs > 0L) "At ${scheduledTargetWallMs.formatClockTime()}" else "Pick exact time")
+                                }
+                            }
+                        }
+                    }
+
+                    else -> {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Voice", style = MaterialTheme.typography.titleSmall)
+                                Text(if (state.speechAvailable) "Say 'go'" else "Unavailable", style = MaterialTheme.typography.bodySmall)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Button(
+                                        enabled = state.speechAvailable,
+                                        onClick = {
+                                            if (!hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
+                                                micPerm.launch(Manifest.permission.RECORD_AUDIO)
+                                            } else {
+                                                startService(context, WearTimerForegroundService.startListeningIntent(context, cadence, offsetMs))
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                    ) { Text("Listen") }
+                                    Button(
+                                        onClick = { startService(context, WearTimerForegroundService.stopListeningIntent(context)) },
+                                        modifier = Modifier.weight(1f),
+                                    ) { Text("Stop") }
+                                }
+                                Text(
+                                    "Notification stays on while running or listening.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(AnnouncementCadence.EVERY_1M, AnnouncementCadence.EVERY_5M).forEach { option ->
-                        CadenceChip(option, cadence == option) { cadence = option }
-                    }
-                }
+                Spacer(Modifier.height(4.dp))
             }
         }
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = offsetSecondsText,
-                    onValueChange = { newValue ->
-                        offsetSecondsText = newValue.filter { ch -> ch.isDigit() || ch == '-' }.take(6)
-                    },
-                    label = { Text("Offset s") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(onClick = { startService(context, WearTimerForegroundService.startNowIntent(context, cadence, offsetMs)) }, modifier = Modifier.weight(1f)) {
-                        Text("Start")
-                    }
-                    Button(onClick = { startService(context, WearTimerForegroundService.stopTimerIntent(context)) }, modifier = Modifier.weight(1f)) {
-                        Text("Stop")
-                    }
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(onClick = { scheduledTargetWallMs = nextMinuteBoundary() }, modifier = Modifier.weight(1f)) { Text("+1m") }
-                    Button(
-                        onClick = {
-                            val target = if (scheduledTargetWallMs > 0L) scheduledTargetWallMs else nextMinuteBoundary()
-                            startService(context, WearTimerForegroundService.scheduleIntent(context, cadence, offsetMs, target))
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Schedule") }
-                }
-                TextButton(onClick = { showTimePicker(context) { scheduledTargetWallMs = it } }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (scheduledTargetWallMs > 0L) "At ${scheduledTargetWallMs.formatClockTime()}" else "Pick exact time")
-                }
-            }
-        }
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Voice", style = MaterialTheme.typography.titleSmall)
-                Text(if (state.speechAvailable) "Say 'go'" else "Unavailable", style = MaterialTheme.typography.bodySmall)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(
-                        enabled = state.speechAvailable,
-                        onClick = {
-                            if (!hasPermission(context, Manifest.permission.RECORD_AUDIO)) micPerm.launch(Manifest.permission.RECORD_AUDIO)
-                            else startService(context, WearTimerForegroundService.startListeningIntent(context, cadence, offsetMs))
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Listen") }
-                    Button(onClick = { startService(context, WearTimerForegroundService.stopListeningIntent(context)) }, modifier = Modifier.weight(1f)) {
-                        Text("Stop")
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(4.dp))
     }
 }
 
