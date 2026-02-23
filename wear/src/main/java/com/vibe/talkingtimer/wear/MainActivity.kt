@@ -108,31 +108,34 @@ private fun WearTimerScreen() {
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                    .padding(bottom = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = if (page == 0) 10.dp else 12.dp, vertical = if (page == 0) 8.dp else 10.dp)
+                    .padding(bottom = 26.dp),
+                verticalArrangement = Arrangement.spacedBy(if (page == 0) 6.dp else 8.dp),
             ) {
-                CompactStatusHeader(
-                    page = page,
-                    timeLabel = state.timeLabel,
-                    statusMessage = state.statusMessage,
-                )
+                if (page == 0) {
+                    RunTimeHeader(timeLabel = state.timeLabel)
+                } else {
+                    CompactStatusHeader(
+                        page = page,
+                        timeLabel = state.timeLabel,
+                        statusMessage = state.statusMessage,
+                    )
+                }
                 when (page) {
                     0 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Cadence", style = MaterialTheme.typography.bodySmall)
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     listOf(AnnouncementCadence.EVERY_10S, AnnouncementCadence.EVERY_30S).forEach { option ->
                                         CadenceChip(option, cadence == option) { cadence = option }
                                     }
                                 }
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     listOf(AnnouncementCadence.EVERY_1M, AnnouncementCadence.EVERY_5M).forEach { option ->
                                         CadenceChip(option, cadence == option) { cadence = option }
                                     }
                                 }
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Button(
                                         onClick = { startService(context, WearTimerForegroundService.startNowIntent(context, cadence, offsetMs)) },
                                         modifier = Modifier.weight(1f),
@@ -218,6 +221,24 @@ private fun WearTimerScreen() {
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 8.dp),
         )
+    }
+}
+
+@Composable
+private fun RunTimeHeader(timeLabel: String) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                timeLabel,
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 
