@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -30,12 +31,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,7 +50,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.sp
@@ -63,12 +67,37 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
-                Surface { WearTimerScreen() }
+            MaterialTheme(colorScheme = WearOledColorScheme) {
+                Surface(color = MaterialTheme.colorScheme.background) { WearTimerScreen() }
             }
         }
     }
 }
+
+private val WearOledColorScheme = darkColorScheme(
+    primary = Color(0xFF7AD7FF),
+    onPrimary = Color.Black,
+    primaryContainer = Color(0xFF0B2A36),
+    onPrimaryContainer = Color(0xFFE4F7FF),
+    secondary = Color(0xFFB8E0FF),
+    onSecondary = Color.Black,
+    secondaryContainer = Color(0xFF102633),
+    onSecondaryContainer = Color(0xFFDDEFFF),
+    tertiary = Color(0xFFA7F3D0),
+    onTertiary = Color.Black,
+    tertiaryContainer = Color(0xFF0F2A24),
+    onTertiaryContainer = Color(0xFFD7FFF2),
+    background = Color.Black,
+    onBackground = Color(0xFFF5F7FA),
+    surface = Color.Black,
+    onSurface = Color(0xFFF5F7FA),
+    surfaceVariant = Color(0xFF0D0F12),
+    onSurfaceVariant = Color(0xFFC8CDD4),
+    outline = Color(0xFF434A54),
+    outlineVariant = Color(0xFF252A31),
+    surfaceTint = Color(0xFF7AD7FF),
+    scrim = Color.Black,
+)
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
@@ -91,18 +120,10 @@ private fun WearTimerScreen() {
         }
     }
 
-    val bg = Brush.radialGradient(
-        colors = listOf(
-            MaterialTheme.colorScheme.tertiaryContainer,
-            MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.surface,
-        ),
-    )
-
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(bg)
+            .background(Color.Black)
     ) {
         HorizontalPager(
             state = pagerState,
@@ -128,16 +149,24 @@ private fun WearTimerScreen() {
                 }
                 when (page) {
                     0 -> {
-                        Card(modifier = Modifier.fillMaxWidth()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = oledCardColors(),
+                            border = oledCardBorder(),
+                        ) {
                             Column(modifier = Modifier.padding(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Button(
                                         onClick = { startService(context, WearTimerForegroundService.startNowIntent(context, cadence, offsetMs)) },
                                         modifier = Modifier.weight(1f),
+                                        colors = oledButtonColors(),
+                                        border = oledButtonBorder(),
                                     ) { Text("Start") }
                                     Button(
                                         onClick = { startService(context, WearTimerForegroundService.stopTimerIntent(context)) },
                                         modifier = Modifier.weight(1f),
+                                        colors = oledButtonColors(),
+                                        border = oledButtonBorder(),
                                     ) { Text("Stop") }
                                 }
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -169,7 +198,11 @@ private fun WearTimerScreen() {
                     }
 
                     1 -> {
-                        Card(modifier = Modifier.fillMaxWidth()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = oledCardColors(),
+                            border = oledCardBorder(),
+                        ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(
                                     value = offsetSecondsText,
@@ -181,13 +214,20 @@ private fun WearTimerScreen() {
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Button(onClick = { scheduledTargetWallMs = nextMinuteBoundary() }, modifier = Modifier.weight(1f)) { Text("+1m") }
+                                    Button(
+                                        onClick = { scheduledTargetWallMs = nextMinuteBoundary() },
+                                        modifier = Modifier.weight(1f),
+                                        colors = oledButtonColors(),
+                                        border = oledButtonBorder(),
+                                    ) { Text("+1m") }
                                     Button(
                                         onClick = {
                                             val target = if (scheduledTargetWallMs > 0L) scheduledTargetWallMs else nextMinuteBoundary()
                                             startService(context, WearTimerForegroundService.scheduleIntent(context, cadence, offsetMs, target))
                                         },
                                         modifier = Modifier.weight(1f),
+                                        colors = oledButtonColors(),
+                                        border = oledButtonBorder(),
                                     ) { Text("Go At") }
                                 }
                                 TextButton(
@@ -201,7 +241,11 @@ private fun WearTimerScreen() {
                     }
 
                     else -> {
-                        Card(modifier = Modifier.fillMaxWidth()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = oledCardColors(),
+                            border = oledCardBorder(),
+                        ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(if (state.speechAvailable) "Say 'go'" else "Unavailable", style = MaterialTheme.typography.bodySmall)
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -215,10 +259,14 @@ private fun WearTimerScreen() {
                                             }
                                         },
                                         modifier = Modifier.weight(1f),
+                                        colors = oledButtonColors(),
+                                        border = oledButtonBorder(),
                                     ) { Text("Listen") }
                                     Button(
                                         onClick = { startService(context, WearTimerForegroundService.stopListeningIntent(context)) },
                                         modifier = Modifier.weight(1f),
+                                        colors = oledButtonColors(),
+                                        border = oledButtonBorder(),
                                     ) { Text("Stop") }
                                 }
                                 Text(
@@ -245,7 +293,11 @@ private fun WearTimerScreen() {
 
 @Composable
 private fun RunTimeHeader(timeLabel: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = oledCardColors(),
+        border = oledCardBorder(),
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -296,7 +348,11 @@ private fun RowScope.CadenceChip(
 
 @Composable
 private fun CompactStatusHeader(page: Int, timeLabel: String, statusMessage: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = oledCardColors(),
+        border = oledCardBorder(),
+    ) {
         Column(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -335,7 +391,7 @@ private fun PageDots(selectedIndex: Int, count: Int, modifier: Modifier = Modifi
     Row(
         modifier = modifier
             .background(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                color = Color.Black.copy(alpha = 0.88f),
                 shape = RoundedCornerShape(999.dp),
             )
             .padding(horizontal = 8.dp, vertical = 5.dp),
@@ -356,6 +412,26 @@ private fun PageDots(selectedIndex: Int, count: Int, modifier: Modifier = Modifi
         }
     }
 }
+
+@Composable
+private fun oledCardColors() = CardDefaults.cardColors(
+    containerColor = Color.Black,
+    contentColor = MaterialTheme.colorScheme.onSurface,
+)
+
+@Composable
+private fun oledCardBorder() = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+
+@Composable
+private fun oledButtonColors() = ButtonDefaults.buttonColors(
+    containerColor = Color.Black,
+    contentColor = MaterialTheme.colorScheme.onSurface,
+    disabledContainerColor = Color(0xFF101214),
+    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+)
+
+@Composable
+private fun oledButtonBorder() = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.8f))
 
 private fun hasPermission(context: Context, permission: String): Boolean {
     return if (Build.VERSION.SDK_INT < 23) true
