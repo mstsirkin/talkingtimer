@@ -130,16 +130,6 @@ private fun WearTimerScreen() {
                     0 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
-                                    listOf(AnnouncementCadence.EVERY_10S, AnnouncementCadence.EVERY_30S).forEach { option ->
-                                        CadenceChip(option, cadence == option) { cadence = option }
-                                    }
-                                }
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
-                                    listOf(AnnouncementCadence.EVERY_1M, AnnouncementCadence.EVERY_5M).forEach { option ->
-                                        CadenceChip(option, cadence == option) { cadence = option }
-                                    }
-                                }
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Button(
                                         onClick = { startService(context, WearTimerForegroundService.startNowIntent(context, cadence, offsetMs)) },
@@ -149,6 +139,30 @@ private fun WearTimerScreen() {
                                         onClick = { startService(context, WearTimerForegroundService.stopTimerIntent(context)) },
                                         modifier = Modifier.weight(1f),
                                     ) { Text("Stop") }
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                                    CadenceChip(
+                                        option = AnnouncementCadence.EVERY_10S,
+                                        selected = cadence == AnnouncementCadence.EVERY_10S,
+                                        contentAlignment = Alignment.CenterEnd,
+                                    ) { cadence = AnnouncementCadence.EVERY_10S }
+                                    CadenceChip(
+                                        option = AnnouncementCadence.EVERY_30S,
+                                        selected = cadence == AnnouncementCadence.EVERY_30S,
+                                        contentAlignment = Alignment.CenterStart,
+                                    ) { cadence = AnnouncementCadence.EVERY_30S }
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                                    CadenceChip(
+                                        option = AnnouncementCadence.EVERY_1M,
+                                        selected = cadence == AnnouncementCadence.EVERY_1M,
+                                        contentAlignment = Alignment.CenterEnd,
+                                    ) { cadence = AnnouncementCadence.EVERY_1M }
+                                    CadenceChip(
+                                        option = AnnouncementCadence.EVERY_5M,
+                                        selected = cadence == AnnouncementCadence.EVERY_5M,
+                                        contentAlignment = Alignment.CenterStart,
+                                    ) { cadence = AnnouncementCadence.EVERY_5M }
                                 }
                             }
                         }
@@ -248,11 +262,16 @@ private fun RunTimeHeader(timeLabel: String) {
 }
 
 @Composable
-private fun RowScope.CadenceChip(option: AnnouncementCadence, selected: Boolean, onClick: () -> Unit) {
+private fun RowScope.CadenceChip(
+    option: AnnouncementCadence,
+    selected: Boolean,
+    contentAlignment: Alignment,
+    onClick: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .weight(1f)
-            .heightIn(min = 22.dp)
+            .heightIn(min = 26.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable(role = Role.Button, onClick = onClick)
             .background(
@@ -262,11 +281,16 @@ private fun RowScope.CadenceChip(option: AnnouncementCadence, selected: Boolean,
             ),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            option.label,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-            modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp),
-        )
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = contentAlignment,
+        ) {
+            Text(
+                option.label,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 20.sp),
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 0.dp),
+            )
+        }
     }
 }
 
