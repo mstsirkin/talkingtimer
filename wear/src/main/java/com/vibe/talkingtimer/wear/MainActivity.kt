@@ -11,11 +11,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,8 +45,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -126,13 +129,13 @@ private fun WearTimerScreen() {
                 when (page) {
                     0 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Column(modifier = Modifier.padding(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
                                     listOf(AnnouncementCadence.EVERY_10S, AnnouncementCadence.EVERY_30S).forEach { option ->
                                         CadenceChip(option, cadence == option) { cadence = option }
                                     }
                                 }
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
                                     listOf(AnnouncementCadence.EVERY_1M, AnnouncementCadence.EVERY_5M).forEach { option ->
                                         CadenceChip(option, cadence == option) { cadence = option }
                                     }
@@ -246,19 +249,24 @@ private fun RunTimeHeader(timeLabel: String) {
 
 @Composable
 private fun RowScope.CadenceChip(option: AnnouncementCadence, selected: Boolean, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
+    Box(
         modifier = Modifier
             .weight(1f)
-            .heightIn(min = 34.dp)
+            .heightIn(min = 22.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button, onClick = onClick)
             .background(
                 if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-                RoundedCornerShape(16.dp),
+                RoundedCornerShape(12.dp),
             ),
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(option.label, style = MaterialTheme.typography.labelMedium)
+        Text(
+            option.label,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+            modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp),
+        )
     }
 }
 
