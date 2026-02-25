@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -14,6 +16,7 @@ import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.vibe.talkingtimer.core.AnnouncementCadence
 import com.vibe.talkingtimer.core.CalloutPhraseBuilder
@@ -40,7 +43,10 @@ class WearTimerForegroundService : Service() {
     private lateinit var audioPlayer: ClipAudioPlayer
 
     private var tickJob: Job? = null
+    private var localKeywordSpotter: LocalKeywordSpotter? = null
     private var speechRecognizer: SpeechRecognizer? = null
+    private var speechForceStopJob: Job? = null
+    private var preferredSpeechRecognizerComponent: ComponentName? = null
     private var speechAvailable: Boolean = true
     private var listening: Boolean = false
     private var restartingSpeech: Boolean = false
@@ -53,7 +59,7 @@ class WearTimerForegroundService : Service() {
         super.onCreate()
         createNotificationChannel()
         audioPlayer = ClipAudioPlayer(this, serviceScope)
-        speechAvailable = SpeechRecognizer.isRecognitionAvailable(this)
+        refreshSpeechRecognizerAvailability()
         startTicker()
         publishState()
     }
@@ -69,6 +75,8 @@ class WearTimerForegroundService : Service() {
 
     override fun onDestroy() {
         stopListeningInternal(updateMessage = false)
+        localKeywordSpotter?.shutdown()
+        localKeywordSpotter = null
         tickJob?.cancel()
         serviceScope.launch {
             audioPlayer.shutdown()
@@ -206,7 +214,7 @@ class WearTimerForegroundService : Service() {
 
     private fun ensureForegroundState() {
         val state = WearTimerStateBus.state.value
-        if (state.isActive) {
+        if (state.isActive || listening) {
             val notification = buildNotification(state)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val type = if (listening) {
@@ -287,6 +295,7 @@ class WearTimerForegroundService : Service() {
     }
 
     private fun startListening() {
+        refreshSpeechRecognizerAvailability()
         if (!speechAvailable) {
             lastStatusMessage = "Speech recognizer unavailable"
             listening = false
@@ -296,41 +305,131 @@ class WearTimerForegroundService : Service() {
 
         listening = true
         lastStatusMessage = "Listening for 'go'"
+        publishState()
+        ensureForegroundState()
         audioPlayer.playTokens(listOf("listening"))
+
+        if (hasLocalKeywordModelAsset()) {
+            val spotter = getOrCreateLocalKeywordSpotter()
+            if (!spotter.start()) {
+                listening = false
+                speechAvailable = false
+                lastStatusMessage = spotter.lastErrorMessage() ?: "Local voice start failed"
+                publishState()
+                ensureForegroundState()
+                maybeStopServiceIfIdle()
+                return
+            }
+            publishState()
+            ensureForegroundState()
+            return
+        }
+
         if (speechRecognizer == null) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+            val recognizer = createConfiguredSpeechRecognizer()
+            if (recognizer == null) {
+                speechAvailable = false
+                listening = false
+                lastStatusMessage = "Speech recognizer unavailable"
+                maybeStopServiceIfIdle()
+                return
+            }
+            speechRecognizer = recognizer.apply {
                 setRecognitionListener(GoRecognitionListener())
             }
         }
         beginListeningSession()
-        ensureForegroundState()
         publishState()
+        ensureForegroundState()
     }
 
-    private fun beginListeningSession() {
-        val recognizer = speechRecognizer ?: return
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+    private fun refreshSpeechRecognizerAvailability() {
+        if (hasLocalKeywordModelAsset()) {
+            speechAvailable = true
+            preferredSpeechRecognizerComponent = null
+            return
         }
-        try {
-            recognizer.cancel()
-            recognizer.startListening(intent)
-        } catch (_: SecurityException) {
-            speechAvailable = false
-            listening = false
-            lastStatusMessage = "Mic permission required"
+        val components = queryRecognitionServiceComponents()
+        preferredSpeechRecognizerComponent = selectPreferredRecognitionService(components)
+        speechAvailable = components.isNotEmpty() || SpeechRecognizer.isRecognitionAvailable(this)
+    }
+
+    private fun hasLocalKeywordModelAsset(): Boolean {
+        return try {
+            assets.openFd("speech_commands.tflite").use { }
+            true
         } catch (_: Exception) {
-            listening = false
-            lastStatusMessage = "Speech start failed"
+            false
         }
     }
 
-    private fun stopListeningInternal(updateMessage: Boolean) {
-        listening = false
-        restartingSpeech = false
+    private fun getOrCreateLocalKeywordSpotter(): LocalKeywordSpotter {
+        return localKeywordSpotter ?: LocalKeywordSpotter(
+            context = applicationContext,
+            scope = serviceScope,
+            listener = object : LocalKeywordSpotter.Listener {
+                override fun onKeywordDetected(score: Float) {
+                    Log.i("TalkingTimerWear", "Local KWS detected go score=$score")
+                    serviceScope.launch(Dispatchers.Main.immediate) {
+                        if (!listening) return@launch
+                        startTimerFromVoice()
+                    }
+                }
+
+                override fun onError(message: String, throwable: Throwable?) {
+                    Log.w("TalkingTimerWear", message, throwable)
+                    serviceScope.launch(Dispatchers.Main.immediate) {
+                        if (!listening) return@launch
+                        listening = false
+                        lastStatusMessage = message
+                        publishState()
+                        ensureForegroundState()
+                        maybeStopServiceIfIdle()
+                    }
+                }
+            },
+        ).also {
+            localKeywordSpotter = it
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun queryRecognitionServiceComponents(): List<ComponentName> {
+        val intent = Intent("android.speech.RecognitionService")
+        val matches = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.queryIntentServices(intent, PackageManager.ResolveInfoFlags.of(0L))
+        } else {
+            packageManager.queryIntentServices(intent, 0)
+        }
+        return matches.mapNotNull { info ->
+            val service = info.serviceInfo ?: return@mapNotNull null
+            ComponentName(service.packageName, service.name)
+        }
+    }
+
+    private fun selectPreferredRecognitionService(components: List<ComponentName>): ComponentName? {
+        if (components.isEmpty()) return null
+        for (candidate in LOCAL_RECOGNIZER_CANDIDATES) {
+            if (components.any { it.packageName == candidate.packageName && it.className == candidate.className }) {
+                return candidate
+            }
+        }
+        return components.first()
+    }
+
+    private fun createConfiguredSpeechRecognizer(): SpeechRecognizer? {
+        return try {
+            preferredSpeechRecognizerComponent?.let { component ->
+                SpeechRecognizer.createSpeechRecognizer(this, component)
+            } ?: SpeechRecognizer.createSpeechRecognizer(this)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun destroySpeechRecognizer() {
+        speechForceStopJob?.cancel()
+        speechForceStopJob = null
         speechRecognizer?.let {
             try {
                 it.stopListening()
@@ -346,6 +445,45 @@ class WearTimerForegroundService : Service() {
             }
         }
         speechRecognizer = null
+    }
+
+    private fun beginListeningSession() {
+        val recognizer = speechRecognizer ?: return
+        speechForceStopJob?.cancel()
+        speechForceStopJob = null
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 400L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 700L)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+        }
+        try {
+            recognizer.cancel()
+            recognizer.startListening(intent)
+        } catch (e: SecurityException) {
+            Log.w("TalkingTimerWear", "Speech start security failure", e)
+            speechAvailable = false
+            listening = false
+            lastStatusMessage = "Mic permission required"
+            destroySpeechRecognizer()
+        } catch (e: Exception) {
+            Log.w("TalkingTimerWear", "Speech start failure", e)
+            listening = false
+            val type = e.javaClass.simpleName.takeIf { it.isNotBlank() }
+            lastStatusMessage = if (type != null) "Speech start failed ($type)" else "Speech start failed"
+            destroySpeechRecognizer()
+        }
+    }
+
+    private fun stopListeningInternal(updateMessage: Boolean) {
+        listening = false
+        restartingSpeech = false
+        localKeywordSpotter?.stop()
+        destroySpeechRecognizer()
         if (updateMessage) {
             lastStatusMessage = "Listening stopped"
             audioPlayer.playTokens(listOf("listening_stopped"))
@@ -355,7 +493,7 @@ class WearTimerForegroundService : Service() {
     private fun restartListeningSoon() {
         if (!listening || restartingSpeech) return
         restartingSpeech = true
-        serviceScope.launch {
+        serviceScope.launch(Dispatchers.Main.immediate) {
             delay(400)
             restartingSpeech = false
             if (listening) {
@@ -380,27 +518,44 @@ class WearTimerForegroundService : Service() {
     }
 
     private inner class GoRecognitionListener : RecognitionListener {
-        override fun onReadyForSpeech(params: android.os.Bundle?) = Unit
-        override fun onBeginningOfSpeech() = Unit
+        override fun onReadyForSpeech(params: android.os.Bundle?) {
+            scheduleForceStopListening(delayMs = 2500L)
+        }
+        override fun onBeginningOfSpeech() {
+            scheduleForceStopListening(delayMs = 1200L)
+        }
         override fun onRmsChanged(rmsdB: Float) = Unit
         override fun onBufferReceived(buffer: ByteArray?) = Unit
-        override fun onEndOfSpeech() = Unit
+        override fun onEndOfSpeech() {
+            speechForceStopJob?.cancel()
+            speechForceStopJob = null
+        }
         override fun onPartialResults(partialResults: android.os.Bundle?) {
+            logRecognitionPhrases("partial", partialResults)
             if (containsGo(partialResults)) {
                 startTimerFromVoice()
             }
         }
 
         override fun onResults(results: android.os.Bundle?) {
+            speechForceStopJob?.cancel()
+            speechForceStopJob = null
+            logRecognitionPhrases("final", results)
             if (containsGo(results)) {
                 startTimerFromVoice()
             } else if (listening) {
+                recognitionPhrases(results).firstOrNull()?.let { heard ->
+                    lastStatusMessage = "Heard: ${heard.take(24)}"
+                }
                 restartListeningSoon()
             }
         }
 
         override fun onError(error: Int) {
             if (!listening) return
+            speechForceStopJob?.cancel()
+            speechForceStopJob = null
+            Log.i("TalkingTimerWear", "Speech onError=$error")
             lastStatusMessage = when (error) {
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
                     speechAvailable = false
@@ -420,11 +575,36 @@ class WearTimerForegroundService : Service() {
         override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
     }
 
+    private fun scheduleForceStopListening(delayMs: Long) {
+        speechForceStopJob?.cancel()
+        speechForceStopJob = serviceScope.launch(Dispatchers.Main.immediate) {
+            delay(delayMs)
+            if (!listening) return@launch
+            try {
+                speechRecognizer?.stopListening()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun recognitionPhrases(bundle: android.os.Bundle?): List<String> {
+        return bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+
+    private fun logRecognitionPhrases(kind: String, bundle: android.os.Bundle?) {
+        val phrases = recognitionPhrases(bundle)
+        if (phrases.isEmpty()) return
+        Log.i("TalkingTimerWear", "Speech $kind results=${phrases.joinToString(" | ")}")
+    }
+
     private fun containsGo(bundle: android.os.Bundle?): Boolean {
-        val list = bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+        val list = recognitionPhrases(bundle)
+        val goWord = Regex("\\bgo\\b")
         return list.any { phrase ->
             val normalized = phrase.lowercase(Locale.US)
-            normalized == "go" || normalized.contains(" go ") || normalized.startsWith("go ") || normalized.endsWith(" go")
+            goWord.containsMatchIn(normalized)
         }
     }
 
@@ -475,6 +655,11 @@ class WearTimerForegroundService : Service() {
         const val ACTION_STOP_TIMER = "com.vibe.talkingtimer.wear.action.STOP_TIMER"
         const val ACTION_START_LISTENING = "com.vibe.talkingtimer.wear.action.START_LISTENING"
         const val ACTION_STOP_LISTENING = "com.vibe.talkingtimer.wear.action.STOP_LISTENING"
+
+        private val LOCAL_RECOGNIZER_CANDIDATES = listOf(
+            ComponentName("com.alexvt.whisperinput", "com.alexvt.whisperinput.speak.service.OfflineRecognitionService"),
+            ComponentName("com.elishaazaria.sayboard", "com.elishaazaria.sayboard.services.SayboardRecognitionService"),
+        )
 
         fun startNowIntent(context: Context, cadence: AnnouncementCadence, startOffsetMs: Long, source: StartSource = StartSource.MANUAL): Intent {
             return intentFor(context, ACTION_START_NOW).apply {

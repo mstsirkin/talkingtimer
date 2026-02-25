@@ -41,6 +41,7 @@ android {
     }
     androidResources {
         noCompress += "mp3"
+        noCompress += "tflite"
     }
     packaging {
         resources {
@@ -49,7 +50,7 @@ android {
     }
     sourceSets {
         getByName("main") {
-            assets.srcDirs("../audio-assets")
+            assets.srcDirs("../audio-assets", "src/main/assets")
         }
     }
 }
@@ -72,6 +73,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.tensorflow:tensorflow-lite-task-audio:0.4.4")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
