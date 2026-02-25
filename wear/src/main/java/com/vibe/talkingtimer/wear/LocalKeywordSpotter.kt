@@ -34,6 +34,8 @@ class LocalKeywordSpotter(
     private var running = false
 
     private var initError: String? = null
+    private var goThreshold: Float = KeywordCalibrationStore.DEFAULT_GO_THRESHOLD
+    private var strongGoThreshold: Float = KeywordCalibrationStore.DEFAULT_STRONG_GO_THRESHOLD
     private var lastTriggerElapsedMs: Long = 0L
     private var lastGoHitElapsedMs: Long = 0L
     private var goHitStreak: Int = 0
@@ -48,6 +50,7 @@ class LocalKeywordSpotter(
     fun start(): Boolean {
         if (!ensureInitialized()) return false
         if (running) return true
+        refreshThresholds()
         val localRecorder = recorder ?: return false
         try {
             localRecorder.startRecording()
@@ -173,11 +176,11 @@ class LocalKeywordSpotter(
             lastDebugLogElapsedMs = now
             Log.i(
                 TAG,
-                "KWS top=${top?.first}:${top?.second ?: 0f} go=$goScore rms=${rms ?: -1f} vad=$vadSpeech",
+                "KWS top=${top?.first}:${top?.second ?: 0f} go=$goScore thresh=$goThreshold rms=${rms ?: -1f} vad=$vadSpeech",
             )
         }
 
-        if (!vadSpeech || goScore < GO_THRESHOLD) {
+        if (!vadSpeech || goScore < goThreshold) {
             if (now - lastGoHitElapsedMs > HIT_WINDOW_MS) {
                 goHitStreak = 0
             }
@@ -191,7 +194,7 @@ class LocalKeywordSpotter(
         goHitStreak = if (now - lastGoHitElapsedMs <= HIT_WINDOW_MS) goHitStreak + 1 else 1
         lastGoHitElapsedMs = now
 
-        val shouldTrigger = goScore >= STRONG_GO_THRESHOLD || goHitStreak >= REQUIRED_HITS
+        val shouldTrigger = goScore >= strongGoThreshold || goHitStreak >= REQUIRED_HITS
         if (!shouldTrigger) return
 
         lastTriggerElapsedMs = now
@@ -220,12 +223,15 @@ class LocalKeywordSpotter(
         }
     }
 
+    private fun refreshThresholds() {
+        val calibration = KeywordCalibrationStore.load(context)
+        goThreshold = calibration.effectiveGoThreshold
+        strongGoThreshold = calibration.effectiveStrongGoThreshold
+    }
+
     companion object {
         private const val TAG = "TalkingTimerKws"
         private const val MODEL_ASSET = "speech_commands.tflite"
-
-        private const val GO_THRESHOLD = 0.55f
-        private const val STRONG_GO_THRESHOLD = 0.75f
         private const val REQUIRED_HITS = 1
         private const val HIT_WINDOW_MS = 700L
         private const val TRIGGER_COOLDOWN_MS = 1500L

@@ -3,6 +3,7 @@ package com.vibe.talkingtimer.wear
 import android.Manifest
 import android.app.TimePickerDialog
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -74,7 +75,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val WearOledColorScheme = darkColorScheme(
+val WearOledColorScheme = darkColorScheme(
     primary = Color(0xFF7AD7FF),
     onPrimary = Color.Black,
     primaryContainer = Color(0xFF0B2A36),
@@ -274,6 +275,12 @@ private fun WearTimerScreen() {
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                TextButton(
+                                    onClick = { context.startActivity(Intent(context, KeywordLabActivity::class.java)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("Keyword Lab")
+                                }
                             }
                         }
                     }
@@ -414,16 +421,16 @@ private fun PageDots(selectedIndex: Int, count: Int, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun oledCardColors() = CardDefaults.cardColors(
+fun oledCardColors() = CardDefaults.cardColors(
     containerColor = Color.Black,
     contentColor = MaterialTheme.colorScheme.onSurface,
 )
 
 @Composable
-private fun oledCardBorder() = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+fun oledCardBorder() = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
 
 @Composable
-private fun oledButtonColors() = ButtonDefaults.buttonColors(
+fun oledButtonColors() = ButtonDefaults.buttonColors(
     containerColor = Color.Black,
     contentColor = MaterialTheme.colorScheme.onSurface,
     disabledContainerColor = Color(0xFF101214),
@@ -431,7 +438,7 @@ private fun oledButtonColors() = ButtonDefaults.buttonColors(
 )
 
 @Composable
-private fun oledButtonBorder() = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.8f))
+fun oledButtonBorder() = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.8f))
 
 private fun hasPermission(context: Context, permission: String): Boolean {
     return if (Build.VERSION.SDK_INT < 23) true
