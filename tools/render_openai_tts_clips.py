@@ -40,6 +40,7 @@ def token_manifest() -> dict[str, str]:
         "timer": "timer",
         "listening": "listening",
         "listening_stopped": "listening stopped",
+        "say_go": "To start, say go",
         "hour": "hour",
         "hours": "hours",
         "minute": "minute",

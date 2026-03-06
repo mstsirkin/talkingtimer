@@ -353,6 +353,7 @@ class WearTimerForegroundService : Service() {
         lastStatusMessage = "Say 'go'"
         publishState()
         ensureForegroundState()
+        audioPlayer.playTokens(listOf("say_go"))
 
         if (hasLocalKeywordModelAsset()) {
             val spotter = getOrCreateLocalKeywordSpotter()

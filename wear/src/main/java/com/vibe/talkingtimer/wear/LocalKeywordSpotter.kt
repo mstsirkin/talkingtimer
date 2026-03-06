@@ -60,7 +60,9 @@ class LocalKeywordSpotter(
             return false
         }
         running = true
-        lastTriggerElapsedMs = SystemClock.elapsedRealtime()
+        // Offset forward so the cooldown covers the prompt audio ("say go")
+        // plus mic buffer clearing time: total ignore = this offset + TRIGGER_COOLDOWN_MS
+        lastTriggerElapsedMs = SystemClock.elapsedRealtime() + PROMPT_SETTLE_MS
         goHitStreak = 0
         loopJob = scope.launch(Dispatchers.Default) {
             runLoop()
@@ -237,6 +239,7 @@ class LocalKeywordSpotter(
         private const val REQUIRED_HITS = 1
         private const val HIT_WINDOW_MS = 700L
         private const val TRIGGER_COOLDOWN_MS = 1500L
+        private const val PROMPT_SETTLE_MS = 1000L
 
         // TensorAudio commonly provides normalized float PCM in [-1, 1].
         private const val RMS_VAD_THRESHOLD = 0.01f
