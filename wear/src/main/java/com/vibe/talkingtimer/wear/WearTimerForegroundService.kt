@@ -144,6 +144,7 @@ class WearTimerForegroundService : Service() {
                     source = intent.getStringExtra(EXTRA_START_SOURCE)?.let { parseStartSource(it) } ?: StartSource.MANUAL,
                 )
                 processEvents(events)
+                onTimingAlarm()
             }
 
             ACTION_SCHEDULE_AT -> {
@@ -207,9 +208,8 @@ class WearTimerForegroundService : Service() {
                         StartSource.VOICE -> "Started by voice"
                         StartSource.MANUAL -> "Started"
                     }
-                    when (event.source) {
-                        StartSource.SCHEDULED -> audioPlayer.playTokens(listOf("timer_started"))
-                        else -> audioPlayer.playTokens(listOf("started"))
+                    if (event.source == StartSource.SCHEDULED) {
+                        audioPlayer.playTokens(listOf("timer_started"))
                     }
                 }
 
@@ -622,6 +622,8 @@ class WearTimerForegroundService : Service() {
             }
         }
 
+        consider(-5_000L)
+        consider(-4_000L)
         consider(-3_000L)
         consider(-2_000L)
         consider(-1_000L)
@@ -852,6 +854,7 @@ class WearTimerForegroundService : Service() {
             source = StartSource.VOICE,
         )
         processEvents(events)
+        onTimingAlarm()
         ensureForegroundState()
         publishState()
         updateNotification()

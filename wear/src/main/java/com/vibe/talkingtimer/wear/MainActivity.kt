@@ -119,7 +119,7 @@ private fun WearTimerScreen() {
     val exactAlarmsAllowed = rememberExactAlarmAccessState()
 
     var cadence by rememberSaveable { mutableStateOf(AnnouncementCadence.EVERY_30S) }
-    var offsetSecondsText by rememberSaveable { mutableStateOf("0") }
+    var offsetSecondsText by rememberSaveable { mutableStateOf("-5") }
     var scheduledTargetWallMs by rememberSaveable { mutableLongStateOf(0L) }
     val offsetMs = offsetSecondsText.toLongOrNull()?.times(1000L) ?: 0L
     val pagerState = rememberPagerState(pageCount = { 3 })
@@ -196,7 +196,7 @@ private fun WearTimerScreen() {
                                             } else if (state.listening) {
                                                 startService(context, WearTimerForegroundService.stopListeningIntent(context))
                                             } else {
-                                                startService(context, WearTimerForegroundService.startListeningIntent(context, cadence, offsetMs))
+                                                startService(context, WearTimerForegroundService.startListeningIntent(context, cadence, 0L))
                                             }
                                         },
                                         modifier = Modifier.weight(1f),

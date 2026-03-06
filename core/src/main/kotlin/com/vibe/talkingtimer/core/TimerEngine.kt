@@ -30,7 +30,7 @@ class TimerEngine {
         mode = TimerMode.RUNNING
         runningAnchorRealtimeMs = nowRealtimeMs
         elapsedAtRunStartMs = cfg.startOffsetMs
-        lastTickElapsedMs = cfg.startOffsetMs
+        lastTickElapsedMs = cfg.startOffsetMs - 1
         return listOf(TimerEvent.Started(source))
     }
 
@@ -99,6 +99,8 @@ class TimerEngine {
             return
         }
         val thresholds = listOf(
+            -5_000L to TimerEvent.Countdown(5),
+            -4_000L to TimerEvent.Countdown(4),
             -3_000L to TimerEvent.Countdown(3),
             -2_000L to TimerEvent.Countdown(2),
             -1_000L to TimerEvent.Countdown(1),
