@@ -4,7 +4,8 @@ import kotlin.math.abs
 
 object TimeFormat {
     fun mmssWithSign(elapsedMs: Long): String {
-        val totalSeconds = abs(elapsedMs) / 1000L
+        // Ceil during countdown so display matches the spoken number
+        val totalSeconds = if (elapsedMs < 0) (abs(elapsedMs) + 999L) / 1000L else abs(elapsedMs) / 1000L
         val hours = totalSeconds / 3600L
         val minutes = (totalSeconds % 3600L) / 60L
         val seconds = totalSeconds % 60L

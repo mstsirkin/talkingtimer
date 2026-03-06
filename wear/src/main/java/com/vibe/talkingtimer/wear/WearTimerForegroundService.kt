@@ -147,6 +147,7 @@ class WearTimerForegroundService : Service() {
                 )
                 processEvents(events)
                 onTimingAlarm()
+                startTicker()
             }
 
             ACTION_SCHEDULE_AT -> {
