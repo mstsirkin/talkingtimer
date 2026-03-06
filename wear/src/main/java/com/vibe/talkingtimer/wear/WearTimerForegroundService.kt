@@ -1,5 +1,6 @@
 package com.vibe.talkingtimer.wear
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,6 +13,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -41,8 +43,11 @@ class WearTimerForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val engine = TimerEngine()
     private lateinit var audioPlayer: ClipAudioPlayer
+    private var cpuWakeLock: PowerManager.WakeLock? = null
+    private var alarmManager: AlarmManager? = null
 
     private var tickJob: Job? = null
+    private var lastTickerLoopElapsedRealtimeMs: Long = 0L
     private var localKeywordSpotter: LocalKeywordSpotter? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private var speechForceStopJob: Job? = null
@@ -58,6 +63,8 @@ class WearTimerForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        initWakeLock()
+        alarmManager = getSystemService(AlarmManager::class.java)
         audioPlayer = ClipAudioPlayer(this, serviceScope)
         refreshSpeechRecognizerAvailability()
         startTicker()
@@ -68,8 +75,10 @@ class WearTimerForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         handleIntent(intent)
-        ensureForegroundState()
         publishState()
+        ensureForegroundState()
+        updateNotification()
+        syncNextTimingAlarm()
         return START_STICKY
     }
 
@@ -81,6 +90,8 @@ class WearTimerForegroundService : Service() {
         serviceScope.launch {
             audioPlayer.shutdown()
         }
+        cancelTimingAlarm()
+        releaseWakeLock()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -90,24 +101,39 @@ class WearTimerForegroundService : Service() {
         tickJob = serviceScope.launch {
             while (isActive) {
                 val nowElapsed = SystemClock.elapsedRealtime()
-                val nowWall = System.currentTimeMillis()
-                val events = engine.tick(nowElapsed, nowWall)
-                if (events.isNotEmpty()) {
-                    processEvents(events)
+                if (lastTickerLoopElapsedRealtimeMs != 0L) {
+                    val loopGapMs = nowElapsed - lastTickerLoopElapsedRealtimeMs
+                    if (loopGapMs > TICK_STALL_LOG_THRESHOLD_MS) {
+                        Log.w("TalkingTimerWear", "Ticker loop gap ${loopGapMs}ms")
+                    }
+                }
+                lastTickerLoopElapsedRealtimeMs = nowElapsed
+                if (WearTimerStateBus.state.value.isActive) {
+                    // Tick engine from loop as fallback for rate-limited alarms.
+                    // The engine's lastTickElapsedMs tracking prevents duplicate events
+                    // if both the alarm and ticker fire near the same boundary.
+                    val events = engine.tick(nowElapsed, System.currentTimeMillis())
+                    if (events.isNotEmpty()) {
+                        processEvents(events)
+                        syncNextTimingAlarm()
+                    }
+                    publishState()
                     ensureForegroundState()
-                    publishState()
-                } else if (WearTimerStateBus.state.value.isActive) {
-                    publishState()
                     updateNotification()
                 }
-                delay(200)
+                delay(UI_TICK_INTERVAL_MS)
             }
         }
     }
 
     private fun handleIntent(intent: Intent?) {
         when (intent?.action) {
+            ACTION_TIMING_ALARM -> {
+                onTimingAlarm()
+            }
+
             ACTION_START_NOW -> {
+                if (!requireExactAlarmsForTimer("Enable exact alarms")) return
                 val cfg = readConfig(intent)
                 currentCadence = cfg.cadence
                 currentStartOffsetMs = cfg.startOffsetMs
@@ -121,6 +147,7 @@ class WearTimerForegroundService : Service() {
             }
 
             ACTION_SCHEDULE_AT -> {
+                if (!requireExactAlarmsForTimer("Enable exact alarms")) return
                 val cfg = readConfig(intent)
                 currentCadence = cfg.cadence
                 currentStartOffsetMs = cfg.startOffsetMs
@@ -149,6 +176,7 @@ class WearTimerForegroundService : Service() {
             }
 
             ACTION_START_LISTENING -> {
+                if (!requireExactAlarmsForTimer("Enable exact alarms")) return
                 currentCadence = parseCadence(intent.getStringExtra(EXTRA_CADENCE)) ?: currentCadence
                 currentStartOffsetMs = intent.getLongExtra(EXTRA_START_OFFSET_MS, currentStartOffsetMs)
                 startListening()
@@ -158,6 +186,15 @@ class WearTimerForegroundService : Service() {
                 stopListeningInternal(updateMessage = true)
                 maybeStopServiceIfIdle()
             }
+        }
+    }
+
+    private fun onTimingAlarm() {
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val nowWall = System.currentTimeMillis()
+        val events = engine.tick(nowElapsed, nowWall)
+        if (events.isNotEmpty()) {
+            processEvents(events)
         }
     }
 
@@ -209,6 +246,10 @@ class WearTimerForegroundService : Service() {
                 speechAvailable = speechAvailable,
                 statusMessage = message,
             ),
+        )
+        syncWakeLock(
+            listening ||
+                (snapshot.mode == TimerMode.RUNNING && snapshot.cadence.intervalMs < ALARM_CLOCK_CADENCE_THRESHOLD_MS),
         )
     }
 
@@ -289,6 +330,7 @@ class WearTimerForegroundService : Service() {
     private fun maybeStopServiceIfIdle() {
         publishState()
         ensureForegroundState()
+        cancelTimingAlarm()
         if (!WearTimerStateBus.state.value.isActive) {
             stopSelf()
         }
@@ -504,6 +546,160 @@ class WearTimerForegroundService : Service() {
         }
     }
 
+    private fun requireExactAlarmsForTimer(message: String): Boolean {
+        if (canScheduleExactAlarmsCompat()) return true
+        if (listening) {
+            stopListeningInternal(updateMessage = false)
+        }
+        lastStatusMessage = message
+        cancelTimingAlarm()
+        return false
+    }
+
+    private fun canScheduleExactAlarmsCompat(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val am = alarmManager ?: getSystemService(AlarmManager::class.java) ?: return false
+        alarmManager = am
+        return am.canScheduleExactAlarms()
+    }
+
+    private fun syncNextTimingAlarm() {
+        val snapshot = engine.snapshot(
+            nowRealtimeMs = SystemClock.elapsedRealtime(),
+            nowWallClockMs = System.currentTimeMillis(),
+        )
+        if (snapshot.mode == TimerMode.IDLE) {
+            cancelTimingAlarm()
+            return
+        }
+        if (!canScheduleExactAlarmsCompat()) {
+            cancelTimingAlarm()
+            return
+        }
+        when (snapshot.mode) {
+            TimerMode.WAITING_FOR_SCHEDULE -> {
+                val targetWall = snapshot.scheduledStartWallClockMs ?: run {
+                    cancelTimingAlarm()
+                    return
+                }
+                scheduleAlarmClock(targetWall, "scheduled-start")
+            }
+
+            TimerMode.RUNNING -> {
+                val nextElapsedTarget = nextRunBoundaryElapsedMs(
+                    elapsedMs = snapshot.elapsedMs,
+                    cadence = snapshot.cadence,
+                ) ?: run {
+                    cancelTimingAlarm()
+                    return
+                }
+                val delayMs = (nextElapsedTarget - snapshot.elapsedMs).coerceAtLeast(1L)
+                if (snapshot.cadence.intervalMs >= ALARM_CLOCK_CADENCE_THRESHOLD_MS) {
+                    scheduleAlarmClock(
+                        System.currentTimeMillis() + delayMs,
+                        "run-boundary@$nextElapsedTarget",
+                    )
+                } else {
+                    // Short cadence: wake lock + ticker handle timing; alarm is backup
+                    scheduleExactAlarmElapsed(
+                        SystemClock.elapsedRealtime() + delayMs,
+                        "run-boundary@$nextElapsedTarget",
+                    )
+                }
+            }
+
+            TimerMode.IDLE -> cancelTimingAlarm()
+        }
+    }
+
+    private fun nextRunBoundaryElapsedMs(elapsedMs: Long, cadence: AnnouncementCadence): Long? {
+        var next: Long? = null
+
+        fun consider(candidate: Long) {
+            if (candidate <= elapsedMs) return
+            if (next == null || candidate < next!!) {
+                next = candidate
+            }
+        }
+
+        consider(-3_000L)
+        consider(-2_000L)
+        consider(-1_000L)
+        consider(0L)
+
+        val interval = cadence.intervalMs
+        if (interval > 0L) {
+            val start = (elapsedMs + 1L).coerceAtLeast(1L)
+            val cadenceBoundary = ceilDiv(start, interval) * interval
+            consider(cadenceBoundary)
+        }
+
+        return next
+    }
+
+    private fun ceilDiv(value: Long, divisor: Long): Long {
+        return if (value <= 0L) 0L else (value + divisor - 1L) / divisor
+    }
+
+    private fun scheduleAlarmClock(triggerWallMs: Long, reason: String) {
+        val am = alarmManager ?: getSystemService(AlarmManager::class.java) ?: return
+        alarmManager = am
+        val showIntent = PendingIntent.getActivity(
+            this,
+            TIMING_ALARM_SHOW_REQUEST_CODE,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val info = AlarmManager.AlarmClockInfo(triggerWallMs, showIntent)
+        try {
+            am.setAlarmClock(info, timingAlarmPendingIntent())
+        } catch (e: SecurityException) {
+            Log.w("TalkingTimerWear", "Alarm clock denied for $reason", e)
+            cancelTimingAlarm()
+            lastStatusMessage = "Enable exact alarms"
+        } catch (t: Throwable) {
+            Log.w("TalkingTimerWear", "Alarm clock failed for $reason", t)
+        }
+    }
+
+    private fun scheduleExactAlarmElapsed(triggerElapsedMs: Long, reason: String) {
+        val am = alarmManager ?: getSystemService(AlarmManager::class.java) ?: return
+        alarmManager = am
+        try {
+            am.setExactAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                triggerElapsedMs,
+                timingAlarmPendingIntent(),
+            )
+        } catch (e: SecurityException) {
+            Log.w("TalkingTimerWear", "Exact alarm denied for $reason", e)
+            cancelTimingAlarm()
+            lastStatusMessage = "Enable exact alarms"
+        } catch (t: Throwable) {
+            Log.w("TalkingTimerWear", "Exact alarm failed for $reason", t)
+        }
+    }
+
+    private fun cancelTimingAlarm() {
+        val am = alarmManager ?: return
+        try {
+            am.cancel(timingAlarmPendingIntent())
+        } catch (t: Throwable) {
+            Log.w("TalkingTimerWear", "Cancel alarm failed", t)
+        }
+    }
+
+    private fun timingAlarmPendingIntent(): PendingIntent {
+        return PendingIntent.getService(
+            this,
+            TIMING_ALARM_REQUEST_CODE,
+            intentFor(this, ACTION_TIMING_ALARM),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = getSystemService(NotificationManager::class.java) ?: return
@@ -515,6 +711,37 @@ class WearTimerForegroundService : Service() {
             description = getString(R.string.notification_channel_desc)
         }
         nm.createNotificationChannel(channel)
+    }
+
+    private fun initWakeLock() {
+        val pm = getSystemService(PowerManager::class.java) ?: return
+        cpuWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG).apply {
+            setReferenceCounted(false)
+        }
+    }
+
+    private fun syncWakeLock(shouldHold: Boolean) {
+        val wakeLock = cpuWakeLock ?: return
+        try {
+            if (shouldHold) {
+                if (!wakeLock.isHeld) wakeLock.acquire()
+            } else if (wakeLock.isHeld) {
+                wakeLock.release()
+            }
+        } catch (t: Throwable) {
+            Log.w("TalkingTimerWear", "Wake lock update failed", t)
+        }
+    }
+
+    private fun releaseWakeLock() {
+        val wakeLock = cpuWakeLock
+        cpuWakeLock = null
+        if (wakeLock == null) return
+        try {
+            if (wakeLock.isHeld) wakeLock.release()
+        } catch (t: Throwable) {
+            Log.w("TalkingTimerWear", "Wake lock release failed", t)
+        }
     }
 
     private inner class GoRecognitionListener : RecognitionListener {
@@ -610,6 +837,14 @@ class WearTimerForegroundService : Service() {
 
     private fun startTimerFromVoice() {
         if (!listening) return
+        if (!requireExactAlarmsForTimer("Enable exact alarms")) {
+            stopListeningInternal(updateMessage = false)
+            publishState()
+            ensureForegroundState()
+            updateNotification()
+            maybeStopServiceIfIdle()
+            return
+        }
         stopListeningInternal(updateMessage = false)
         val events = engine.startNow(
             nowRealtimeMs = SystemClock.elapsedRealtime(),
@@ -620,6 +855,7 @@ class WearTimerForegroundService : Service() {
         ensureForegroundState()
         publishState()
         updateNotification()
+        syncNextTimingAlarm()
     }
 
     private fun readConfig(intent: Intent): TimerConfig {
@@ -644,6 +880,8 @@ class WearTimerForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "talking_timer"
         private const val NOTIFICATION_ID = 1
+        private const val WAKE_LOCK_TAG = "TalkingTimer:WearTimer"
+        private const val TICK_STALL_LOG_THRESHOLD_MS = 2_000L
 
         private const val EXTRA_CADENCE = "cadence"
         private const val EXTRA_START_OFFSET_MS = "start_offset_ms"
@@ -655,6 +893,11 @@ class WearTimerForegroundService : Service() {
         const val ACTION_STOP_TIMER = "com.vibe.talkingtimer.wear.action.STOP_TIMER"
         const val ACTION_START_LISTENING = "com.vibe.talkingtimer.wear.action.START_LISTENING"
         const val ACTION_STOP_LISTENING = "com.vibe.talkingtimer.wear.action.STOP_LISTENING"
+        private const val ACTION_TIMING_ALARM = "com.vibe.talkingtimer.wear.action.TIMING_ALARM"
+        private const val TIMING_ALARM_REQUEST_CODE = 301
+        private const val TIMING_ALARM_SHOW_REQUEST_CODE = 302
+        private const val ALARM_CLOCK_CADENCE_THRESHOLD_MS = 30_000L
+        private const val UI_TICK_INTERVAL_MS = 1_000L
 
         private val LOCAL_RECOGNIZER_CANDIDATES = listOf(
             ComponentName("com.alexvt.whisperinput", "com.alexvt.whisperinput.speak.service.OfflineRecognitionService"),

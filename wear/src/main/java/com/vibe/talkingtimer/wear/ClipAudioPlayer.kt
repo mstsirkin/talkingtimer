@@ -2,6 +2,7 @@ package com.vibe.talkingtimer.wear
 
 import android.content.Context
 import android.media.MediaPlayer
+import android.os.PowerManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,6 +68,7 @@ class ClipAudioPlayer(
                 afd.use {
                     player.setDataSource(it.fileDescriptor, it.startOffset, it.length)
                 }
+                player.setWakeMode(context, PowerManager.PARTIAL_WAKE_LOCK)
                 player.prepare()
                 player.start()
             } catch (_: Exception) {
