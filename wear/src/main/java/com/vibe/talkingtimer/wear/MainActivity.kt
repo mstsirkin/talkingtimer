@@ -1,16 +1,20 @@
 package com.vibe.talkingtimer.wear
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.TimePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,6 +22,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -42,21 +47,27 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vibe.talkingtimer.core.AnnouncementCadence
 import java.text.SimpleDateFormat
@@ -105,6 +116,7 @@ val WearOledColorScheme = darkColorScheme(
 private fun WearTimerScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val state by WearTimerStateBus.state.collectAsStateWithLifecycle()
+    val exactAlarmsAllowed = rememberExactAlarmAccessState()
 
     var cadence by rememberSaveable { mutableStateOf(AnnouncementCadence.EVERY_30S) }
     var offsetSecondsText by rememberSaveable { mutableStateOf("0") }
@@ -150,6 +162,9 @@ private fun WearTimerScreen() {
                 }
                 when (page) {
                     0 -> {
+                        if (!exactAlarmsAllowed) {
+                            ExactAlarmWarningCard(onFix = { openExactAlarmSettings(context) })
+                        }
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = oledCardColors(),
@@ -157,18 +172,43 @@ private fun WearTimerScreen() {
                         ) {
                             Column(modifier = Modifier.padding(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    val iconPadding = PaddingValues(horizontal = 0.dp, vertical = 8.dp)
                                     Button(
+                                        enabled = exactAlarmsAllowed,
                                         onClick = { startService(context, WearTimerForegroundService.startNowIntent(context, cadence, offsetMs)) },
                                         modifier = Modifier.weight(1f),
                                         colors = oledButtonColors(),
                                         border = oledButtonBorder(),
-                                    ) { Text("Start") }
+                                        contentPadding = iconPadding,
+                                    ) { PlayTriangle(size = 32.dp, color = Color.Red) }
                                     Button(
                                         onClick = { startService(context, WearTimerForegroundService.stopTimerIntent(context)) },
                                         modifier = Modifier.weight(1f),
                                         colors = oledButtonColors(),
                                         border = oledButtonBorder(),
-                                    ) { Text("Stop") }
+                                        contentPadding = iconPadding,
+                                    ) { StopSquare(size = 32.dp, color = Color.Red) }
+                                    Button(
+                                        enabled = exactAlarmsAllowed && state.speechAvailable,
+                                        onClick = {
+                                            if (!hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
+                                                micPerm.launch(Manifest.permission.RECORD_AUDIO)
+                                            } else if (state.listening) {
+                                                startService(context, WearTimerForegroundService.stopListeningIntent(context))
+                                            } else {
+                                                startService(context, WearTimerForegroundService.startListeningIntent(context, cadence, offsetMs))
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        colors = oledButtonColors(),
+                                        border = oledButtonBorder(),
+                                        contentPadding = iconPadding,
+                                    ) {
+                                        MicIcon(
+                                            size = 32.dp,
+                                            color = if (state.listening) Color.Green else Color.Red,
+                                        )
+                                    }
                                 }
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
                                     CadenceChip(
@@ -199,6 +239,9 @@ private fun WearTimerScreen() {
                     }
 
                     1 -> {
+                        if (!exactAlarmsAllowed) {
+                            ExactAlarmWarningCard(onFix = { openExactAlarmSettings(context) })
+                        }
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = oledCardColors(),
@@ -222,6 +265,7 @@ private fun WearTimerScreen() {
                                         border = oledButtonBorder(),
                                     ) { Text("+1m") }
                                     Button(
+                                        enabled = exactAlarmsAllowed,
                                         onClick = {
                                             val target = if (scheduledTargetWallMs > 0L) scheduledTargetWallMs else nextMinuteBoundary()
                                             startService(context, WearTimerForegroundService.scheduleIntent(context, cadence, offsetMs, target))
@@ -242,16 +286,26 @@ private fun WearTimerScreen() {
                     }
 
                     else -> {
+                        if (!exactAlarmsAllowed) {
+                            ExactAlarmWarningCard(onFix = { openExactAlarmSettings(context) })
+                        }
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = oledCardColors(),
                             border = oledCardBorder(),
                         ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(if (state.speechAvailable) "Say 'go'" else "Unavailable", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    when {
+                                        !exactAlarmsAllowed -> "Enable exact alarms first"
+                                        state.speechAvailable -> "Say 'go'"
+                                        else -> "Unavailable"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Button(
-                                        enabled = state.speechAvailable,
+                                        enabled = exactAlarmsAllowed && state.speechAvailable,
                                         onClick = {
                                             if (!hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
                                                 micPerm.launch(Manifest.permission.RECORD_AUDIO)
@@ -296,6 +350,66 @@ private fun WearTimerScreen() {
                 .padding(bottom = 8.dp),
         )
     }
+}
+
+@Composable
+private fun ExactAlarmWarningCard(onFix: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = oledCardColors(),
+        border = BorderStroke(1.dp, Color(0xFF7A4B00)),
+    ) {
+        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "Enable Exact Alarms for reliable timing.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Button(
+                onClick = onFix,
+                modifier = Modifier.fillMaxWidth(),
+                colors = oledButtonColors(),
+                border = oledButtonBorder(),
+            ) {
+                Text("Open Settings")
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberExactAlarmAccessState(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var allowed by remember { mutableStateOf(canScheduleExactAlarms(context)) }
+
+    DisposableEffect(context, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                allowed = canScheduleExactAlarms(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    return allowed
+}
+
+private fun canScheduleExactAlarms(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+    val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return false
+    return alarmManager.canScheduleExactAlarms()
+}
+
+private fun openExactAlarmSettings(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+        data = Uri.parse("package:${context.packageName}")
+    }
+    context.startActivity(intent)
 }
 
 @Composable
@@ -417,6 +531,68 @@ private fun PageDots(selectedIndex: Int, count: Int, modifier: Modifier = Modifi
                     .background(color = color, shape = CircleShape),
             )
         }
+    }
+}
+
+@Composable
+private fun PlayTriangle(size: Dp, color: Color) {
+    Canvas(modifier = Modifier.size(size)) {
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(0f, 0f)
+            lineTo(this@Canvas.size.width, this@Canvas.size.height / 2f)
+            lineTo(0f, this@Canvas.size.height)
+            close()
+        }
+        drawPath(path, color)
+    }
+}
+
+@Composable
+private fun StopSquare(size: Dp, color: Color) {
+    Canvas(modifier = Modifier.size(size)) {
+        drawRect(color)
+    }
+}
+
+@Composable
+private fun MicIcon(size: Dp, color: Color) {
+    Canvas(modifier = Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val micWidth = w * 0.36f
+        val micHeight = h * 0.50f
+        val micLeft = (w - micWidth) / 2f
+        val micTop = h * 0.05f
+        val cornerRadius = micWidth / 2f
+        // Mic head
+        drawRoundRect(
+            color = color,
+            topLeft = androidx.compose.ui.geometry.Offset(micLeft, micTop),
+            size = androidx.compose.ui.geometry.Size(micWidth, micHeight),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadius),
+        )
+        // Arc holder
+        val arcStroke = w * 0.08f
+        val arcTop = micTop + micHeight * 0.35f
+        val arcBottom = micTop + micHeight + h * 0.12f
+        drawArc(
+            color = color,
+            startAngle = 0f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = androidx.compose.ui.geometry.Offset(micLeft - w * 0.08f, arcTop),
+            size = androidx.compose.ui.geometry.Size(micWidth + w * 0.16f, (arcBottom - arcTop) * 2f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = arcStroke),
+        )
+        // Stem
+        val stemTop = arcBottom
+        val stemBottom = h * 0.95f
+        drawLine(
+            color = color,
+            start = androidx.compose.ui.geometry.Offset(w / 2f, stemTop),
+            end = androidx.compose.ui.geometry.Offset(w / 2f, stemBottom),
+            strokeWidth = arcStroke,
+        )
     }
 }
 
