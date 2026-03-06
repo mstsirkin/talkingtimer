@@ -259,20 +259,21 @@ class WearTimerForegroundService : Service() {
 
     private fun ensureForegroundState() {
         val state = WearTimerStateBus.state.value
-        if (state.isActive || listening) {
-            val notification = buildNotification(state)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val type = if (listening) {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                } else {
+        val notification = buildNotification(state)
+        // Always call startForeground first to satisfy the system requirement
+        // after startForegroundService(), then stop if idle.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val type = if (listening) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                }
-                startForeground(NOTIFICATION_ID, notification, type)
             } else {
-                startForeground(NOTIFICATION_ID, notification)
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             }
+            startForeground(NOTIFICATION_ID, notification, type)
         } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+        if (!state.isActive && !listening) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         }
     }
