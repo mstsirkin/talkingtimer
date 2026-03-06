@@ -60,6 +60,8 @@ class LocalKeywordSpotter(
             return false
         }
         running = true
+        lastTriggerElapsedMs = SystemClock.elapsedRealtime()
+        goHitStreak = 0
         loopJob = scope.launch(Dispatchers.Default) {
             runLoop()
         }

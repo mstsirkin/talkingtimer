@@ -9,11 +9,13 @@ class TimerEngine {
     private var runningAnchorRealtimeMs: Long = 0L
     private var elapsedAtRunStartMs: Long = 0L
     private var lastTickElapsedMs: Long? = null
+    private var stoppedElapsedMs: Long = 0L
 
     fun snapshot(nowRealtimeMs: Long, nowWallClockMs: Long): TimerSnapshot {
         val elapsed = when (mode) {
             TimerMode.RUNNING -> currentElapsedMs(nowRealtimeMs)
-            else -> config.startOffsetMs
+            TimerMode.WAITING_FOR_SCHEDULE -> config.startOffsetMs
+            TimerMode.IDLE -> stoppedElapsedMs
         }
         return TimerSnapshot(
             mode = mode,
@@ -51,8 +53,13 @@ class TimerEngine {
         }
     }
 
-    fun stop(): List<TimerEvent> {
+    fun stop(nowRealtimeMs: Long = 0L): List<TimerEvent> {
         val wasRunning = mode == TimerMode.RUNNING || mode == TimerMode.WAITING_FOR_SCHEDULE
+        stoppedElapsedMs = if (mode == TimerMode.RUNNING && nowRealtimeMs > 0L) {
+            currentElapsedMs(nowRealtimeMs).coerceAtLeast(0L)
+        } else {
+            0L
+        }
         mode = TimerMode.IDLE
         scheduledStartWallClockMs = null
         lastTickElapsedMs = null

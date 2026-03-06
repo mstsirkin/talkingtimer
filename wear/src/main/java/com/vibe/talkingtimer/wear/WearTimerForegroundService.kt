@@ -108,14 +108,16 @@ class WearTimerForegroundService : Service() {
                     }
                 }
                 lastTickerLoopElapsedRealtimeMs = nowElapsed
-                if (WearTimerStateBus.state.value.isActive) {
-                    // Tick engine from loop as fallback for rate-limited alarms.
-                    // The engine's lastTickElapsedMs tracking prevents duplicate events
-                    // if both the alarm and ticker fire near the same boundary.
-                    val events = engine.tick(nowElapsed, System.currentTimeMillis())
-                    if (events.isNotEmpty()) {
-                        processEvents(events)
-                        syncNextTimingAlarm()
+                val state = WearTimerStateBus.state.value
+                if (state.isActive) {
+                    // Tick engine from loop during countdown (wake lock held) or
+                    // for short cadences.  Long cadences use setAlarmClock instead.
+                    if (state.elapsedMs < 0 || state.cadence.intervalMs < ALARM_CLOCK_CADENCE_THRESHOLD_MS) {
+                        val events = engine.tick(nowElapsed, System.currentTimeMillis())
+                        if (events.isNotEmpty()) {
+                            processEvents(events)
+                            syncNextTimingAlarm()
+                        }
                     }
                     publishState()
                     ensureForegroundState()
@@ -171,7 +173,7 @@ class WearTimerForegroundService : Service() {
             }
 
             ACTION_STOP_TIMER -> {
-                processEvents(engine.stop())
+                processEvents(engine.stop(nowRealtimeMs = SystemClock.elapsedRealtime()))
                 lastStatusMessage = if (listening) "Listening" else "Stopped"
                 maybeStopServiceIfIdle()
             }
@@ -249,7 +251,8 @@ class WearTimerForegroundService : Service() {
         )
         syncWakeLock(
             listening ||
-                (snapshot.mode == TimerMode.RUNNING && snapshot.cadence.intervalMs < ALARM_CLOCK_CADENCE_THRESHOLD_MS),
+                (snapshot.mode == TimerMode.RUNNING &&
+                    (snapshot.elapsedMs < 0 || snapshot.cadence.intervalMs < ALARM_CLOCK_CADENCE_THRESHOLD_MS)),
         )
     }
 
@@ -346,10 +349,9 @@ class WearTimerForegroundService : Service() {
         if (listening) return
 
         listening = true
-        lastStatusMessage = "Listening for 'go'"
+        lastStatusMessage = "Say 'go'"
         publishState()
         ensureForegroundState()
-        audioPlayer.playTokens(listOf("listening"))
 
         if (hasLocalKeywordModelAsset()) {
             val spotter = getOrCreateLocalKeywordSpotter()
@@ -594,13 +596,18 @@ class WearTimerForegroundService : Service() {
                     return
                 }
                 val delayMs = (nextElapsedTarget - snapshot.elapsedMs).coerceAtLeast(1L)
+                if (nextElapsedTarget <= 0) {
+                    // Countdown: wake lock + ticker handle timing, no alarm needed
+                    return
+                }
                 if (snapshot.cadence.intervalMs >= ALARM_CLOCK_CADENCE_THRESHOLD_MS) {
+                    // Long cadence: alarm clock is not rate-limited
                     scheduleAlarmClock(
                         System.currentTimeMillis() + delayMs,
                         "run-boundary@$nextElapsedTarget",
                     )
                 } else {
-                    // Short cadence: wake lock + ticker handle timing; alarm is backup
+                    // Short cadence, normal running: wake lock + ticker handle timing
                     scheduleExactAlarmElapsed(
                         SystemClock.elapsedRealtime() + delayMs,
                         "run-boundary@$nextElapsedTarget",

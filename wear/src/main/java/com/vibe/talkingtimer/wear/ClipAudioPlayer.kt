@@ -23,7 +23,7 @@ class ClipAudioPlayer(
     private val localeSearchPaths: List<String> = buildLocaleSearchPaths()
     private val worker: Job = scope.launch(Dispatchers.Main.immediate) {
         while (isActive) {
-            val tokens = queue.receive()
+            val tokens = queue.receiveCatching().getOrNull() ?: break
             for (token in tokens) {
                 playToken(token)
             }
