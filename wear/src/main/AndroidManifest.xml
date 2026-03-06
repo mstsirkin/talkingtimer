@@ -23,7 +23,7 @@
         android:label="@string/app_name"
         android:roundIcon="@drawable/ic_talkingtimer_launcher"
         android:supportsRtl="true"
-        android:theme="@style/Theme.TalkingTimerWear">
+        android:theme="@style/Theme.TalkingTimerWear.Splash">
 
         <service
             android:name=".WearTimerForegroundService"
