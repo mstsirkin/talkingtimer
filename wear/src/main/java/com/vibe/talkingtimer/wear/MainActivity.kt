@@ -70,6 +70,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vibe.talkingtimer.core.AnnouncementCadence
+import com.vibe.talkingtimer.core.TimerMode
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -180,14 +181,26 @@ private fun WearTimerScreen() {
                                         colors = oledButtonColors(),
                                         border = oledButtonBorder(),
                                         contentPadding = iconPadding,
-                                    ) { PlayTriangle(size = 32.dp, color = Color.Red) }
+                                    ) {
+                                        PlayTriangle(
+                                            size = 32.dp,
+                                            color = Color.Red,
+                                            outlined = state.mode == TimerMode.RUNNING,
+                                        )
+                                    }
                                     Button(
                                         onClick = { startService(context, WearTimerForegroundService.stopTimerIntent(context)) },
                                         modifier = Modifier.weight(1f),
                                         colors = oledButtonColors(),
                                         border = oledButtonBorder(),
                                         contentPadding = iconPadding,
-                                    ) { StopSquare(size = 32.dp, color = Color.Red) }
+                                    ) {
+                                        StopSquare(
+                                            size = 32.dp,
+                                            color = Color.Red,
+                                            outlined = state.mode == TimerMode.IDLE && !state.listening && state.elapsedMs > 0,
+                                        )
+                                    }
                                     Button(
                                         enabled = exactAlarmsAllowed && state.speechAvailable,
                                         onClick = {
@@ -535,7 +548,7 @@ private fun PageDots(selectedIndex: Int, count: Int, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun PlayTriangle(size: Dp, color: Color) {
+private fun PlayTriangle(size: Dp, color: Color, outlined: Boolean = false) {
     Canvas(modifier = Modifier.size(size)) {
         val path = androidx.compose.ui.graphics.Path().apply {
             moveTo(0f, 0f)
@@ -543,14 +556,23 @@ private fun PlayTriangle(size: Dp, color: Color) {
             lineTo(0f, this@Canvas.size.height)
             close()
         }
-        drawPath(path, color)
+        if (outlined) {
+            drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = this.size.width * 0.08f))
+        } else {
+            drawPath(path, color)
+        }
     }
 }
 
 @Composable
-private fun StopSquare(size: Dp, color: Color) {
+private fun StopSquare(size: Dp, color: Color, outlined: Boolean = false) {
     Canvas(modifier = Modifier.size(size)) {
-        drawRect(color)
+        if (outlined) {
+            val strokeWidth = this.size.width * 0.08f
+            drawRect(color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth))
+        } else {
+            drawRect(color)
+        }
     }
 }
 
