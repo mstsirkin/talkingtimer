@@ -909,7 +909,8 @@ class WearTimerForegroundService : Service() {
         private const val ACTION_TIMING_ALARM = "com.vibe.talkingtimer.wear.action.TIMING_ALARM"
         private const val TIMING_ALARM_REQUEST_CODE = 301
         private const val TIMING_ALARM_SHOW_REQUEST_CODE = 302
-        private const val ALARM_CLOCK_CADENCE_THRESHOLD_MS = 30_000L
+        // Treat anything below 5 minutes as a short cadence on watch hardware.
+        private const val ALARM_CLOCK_CADENCE_THRESHOLD_MS = 5 * 60_000L
         private const val UI_TICK_INTERVAL_MS = 1_000L
 
         private val LOCAL_RECOGNIZER_CANDIDATES = listOf(
