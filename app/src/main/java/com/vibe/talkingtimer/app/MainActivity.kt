@@ -1,11 +1,15 @@
 package com.vibe.talkingtimer.app
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.TimePickerDialog
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -42,9 +47,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vibe.talkingtimer.core.AnnouncementCadence
 import java.text.SimpleDateFormat
@@ -70,6 +78,7 @@ class MainActivity : ComponentActivity() {
 private fun TalkingTimerScreen() {
     val context = LocalContext.current
     val state by PhoneTimerStateBus.state.collectAsStateWithLifecycle()
+    val exactAlarmsAllowed = rememberExactAlarmAccessState()
 
     var cadence by rememberSaveable { mutableStateOf(AnnouncementCadence.EVERY_30S) }
     var offsetSecondsText by rememberSaveable { mutableStateOf("0") }
@@ -103,6 +112,23 @@ private fun TalkingTimerScreen() {
     ) {
         Text("Talking Timer", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Text(state.statusMessage, style = MaterialTheme.typography.bodyLarge)
+
+        if (!exactAlarmsAllowed) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Exact alarms are required for reliable timing while the device sleeps.")
+                    Button(
+                        onClick = { openExactAlarmSettings(context) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Enable Exact Alarms")
+                    }
+                }
+            }
+        }
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -148,6 +174,7 @@ private fun TalkingTimerScreen() {
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(
+                        enabled = exactAlarmsAllowed,
                         onClick = {
                             startService(context, TimerForegroundService.startNowIntent(context, cadence, offsetMs))
                         },
@@ -177,6 +204,7 @@ private fun TalkingTimerScreen() {
                         modifier = Modifier.weight(1f),
                     ) { Text("Pick Time") }
                     Button(
+                        enabled = exactAlarmsAllowed,
                         onClick = {
                             val target = if (scheduledTargetWallMs > 0L) scheduledTargetWallMs else nextMinuteBoundary()
                             startService(context, TimerForegroundService.scheduleIntent(context, cadence, offsetMs, target))
@@ -193,10 +221,16 @@ private fun TalkingTimerScreen() {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text("Voice Start (last step)", style = MaterialTheme.typography.titleMedium)
-                Text(if (state.speechAvailable) "On-device speech preferred; say 'go'" else "Speech recognizer unavailable on this device")
+                Text(
+                    when {
+                        !exactAlarmsAllowed -> "Enable exact alarms first"
+                        state.speechAvailable -> "On-device speech preferred; say 'go'"
+                        else -> "Speech recognizer unavailable on this device"
+                    },
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(
-                        enabled = state.speechAvailable,
+                        enabled = exactAlarmsAllowed && state.speechAvailable,
                         onClick = {
                             if (!hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
                                 micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -229,6 +263,27 @@ private fun rememberPermissionLauncher(permission: String) =
         contract = ActivityResultContracts.RequestPermission(),
     ) { _ -> }
 
+@Composable
+private fun rememberExactAlarmAccessState(): Boolean {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var allowed by remember { mutableStateOf(canScheduleExactAlarms(context)) }
+
+    DisposableEffect(context, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                allowed = canScheduleExactAlarms(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    return allowed
+}
+
 private fun hasPermission(context: Context, permission: String): Boolean {
     return if (Build.VERSION.SDK_INT < 23) true
     else ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
@@ -236,6 +291,20 @@ private fun hasPermission(context: Context, permission: String): Boolean {
 
 private fun startService(context: Context, intent: android.content.Intent) {
     ContextCompat.startForegroundService(context, intent)
+}
+
+private fun canScheduleExactAlarms(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+    val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return false
+    return alarmManager.canScheduleExactAlarms()
+}
+
+private fun openExactAlarmSettings(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+        data = Uri.parse("package:${context.packageName}")
+    }
+    context.startActivity(intent)
 }
 
 private fun Long.formatClockTime(): String = SimpleDateFormat("h:mm:ss a", Locale.US).format(Date(this))
