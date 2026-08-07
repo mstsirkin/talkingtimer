@@ -25,6 +25,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.TalkingTimerWear.Splash">
 
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+
         <service
             android:name=".WearTimerForegroundService"
             android:enabled="true"
